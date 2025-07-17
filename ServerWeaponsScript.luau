@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local CollectionService = game:GetService("CollectionService")
 local curWeaponsSystemFolder = script.Parent
 local weaponsSystemFolder = ReplicatedStorage:FindFirstChild("WeaponsSystem")
 local weaponsSystemInitialized = false
@@ -64,18 +65,39 @@ if ServerScriptService:FindFirstChild("ServerWeaponsScript") == nil then
 
 	print("Setting up sniper ragdoll system...")
 
-	--||Hook into the existing damage system||--
+	--||Override BulletWeapon onHit to add damage + sniper ragdoll||--
+	local BulletWeapon = require(weaponsSystemFolder.WeaponTypes.BulletWeapon)
+	local originalOnHit = BulletWeapon.onHit
+
+	BulletWeapon.onHit = function(self, hitInfo)
+		-- Call original onHit first (handles visual effects, sounds, etc)
+		if originalOnHit then
+			originalOnHit(self, hitInfo)
+		end
+
+		-- Add damage system call
+		local hitPart = hitInfo.part
+		if hitPart and hitPart.Parent then
+			local humanoid = self.weaponsSystem.getHumanoid(hitPart)
+			if humanoid then
+				-- Get damage from weapon config
+				local damage = self:getConfigValue("Damage", 50)
+
+				-- Call damage system
+				WeaponsSystem.doDamage(humanoid, damage, "bullet", self.player, hitInfo, {weapon = self})
+			end
+		end
+	end
+
+	--||Hook into the damage system||--
 	local originalDoDamage = WeaponsSystem.doDamage
 	WeaponsSystem.doDamage = function(target, amount, damageType, dealer, hitInfo, damageData)
-		print("DAMAGE DETECTED:", amount, "to", target and target.Parent and target.Parent.Name or "unknown")
-
 		-- Check if dealer has sniper equipped
 		local isSniper = false
 		if dealer and dealer.Character then
 			local tool = dealer.Character:FindFirstChildOfClass("Tool")
 			if tool and (tool.Name == "Sniper" or tool.Name:find("Sniper")) then
 				isSniper = true
-				print("SNIPER DAMAGE DETECTED!")
 			end
 		end
 
@@ -84,34 +106,51 @@ if ServerScriptService:FindFirstChild("ServerWeaponsScript") == nil then
 			originalDoDamage(target, amount, damageType, dealer, hitInfo, damageData)
 		end
 
-		-- Apply ragdoll if sniper hit
+		-- Apply enhanced sniper ragdoll if sniper hit
 		if isSniper and target and target:IsA("Humanoid") and target.Health > 0 then
-			print("APPLYING SNIPER RAGDOLL to:", target.Parent.Name)
+			local character = target.Parent
+			local ragdollConstraints = character:FindFirstChild("RagdollConstraints")
+			local hasRagdollTag = CollectionService:HasTag(target, "Ragdoll")
 
 			task.spawn(function()
-				-- Set to physics state
+				-- Force ragdoll manually
+				target.PlatformStand = true
+				task.wait(0.05)
 				target:ChangeState(Enum.HumanoidStateType.Physics)
 
-				-- Add extra knockback
-				local character = target.Parent
+				-- Manually trigger ragdoll constraints
+				local ragdollConstraints = character:FindFirstChild("RagdollConstraints")
+				if ragdollConstraints then
+					for _, constraint in pairs(ragdollConstraints:GetChildren()) do
+						if constraint:IsA("Constraint") and constraint:FindFirstChild("RigidJoint") then
+							local rigidJoint = constraint.RigidJoint.Value
+							if rigidJoint then
+								rigidJoint.Part1 = nil
+							end
+						end
+					end
+				end
+
+				-- Add enhanced sniper knockback
 				local rootPart = character:FindFirstChild("HumanoidRootPart")
 				if rootPart and dealer and dealer.Character and dealer.Character:FindFirstChild("HumanoidRootPart") then
 					local shooterPos = dealer.Character.HumanoidRootPart.Position
 					local targetPos = rootPart.Position
 					local knockbackDirection = (targetPos - shooterPos).Unit
 
+					-- Stronger knockback for sniper
 					local bodyVelocity = Instance.new("BodyVelocity")
-					bodyVelocity.MaxForce = Vector3.new(4000, 1000, 4000)
-					bodyVelocity.Velocity = knockbackDirection * 50 + Vector3.new(0, 25, 0)
+					bodyVelocity.MaxForce = Vector3.new(6000, 2000, 6000)
+					bodyVelocity.Velocity = knockbackDirection * 75 + Vector3.new(0, 35, 0)
 					bodyVelocity.Parent = rootPart
 
-					game:GetService("Debris"):AddItem(bodyVelocity, 0.4)
+					game:GetService("Debris"):AddItem(bodyVelocity, 0.6)
 				end
 
-				-- Recovery after time
-				task.wait(3)
-				if target.Health > 0 then
-					print("Recovering from sniper ragdoll...")
+				-- Longer ragdoll time for sniper
+				task.wait(5)
+				if target and target.Parent and target.Health > 0 then
+					target.PlatformStand = false
 					target:ChangeState(Enum.HumanoidStateType.Freefall)
 				end
 			end)
