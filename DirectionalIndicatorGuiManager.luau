@@ -102,6 +102,12 @@ end
 
 function DirectionalIndicatorGuiManager:CalculateDIRotation(otherPosition)
 	local camera = self.weaponsGui.weaponsSystem.camera
+
+	-- Add nil checks to prevent errors during ragdoll
+	if not camera or not camera.currentCamera or not camera.currentCamera.Focus then
+		return 0 -- Return default rotation if camera data is missing
+	end
+
 	local localPlayerOffsetPositionXZ = Vector3.new(camera.currentCamera.Focus.X, 0, camera.currentCamera.Focus.Z)
 	local otherPlayerPositionXZ = Vector3.new(otherPosition.X, 0, otherPosition.Z)
 	local toOtherPlayer = (localPlayerOffsetPositionXZ - otherPlayerPositionXZ).Unit
